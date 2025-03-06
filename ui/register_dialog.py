@@ -1,161 +1,148 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
-                            QLabel, QLineEdit, QMessageBox)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QImage, QPixmap
+import os
 import cv2
+import time
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QLineEdit, 
+    QPushButton, QMessageBox, QLabel
+)
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
+from .face_capture_dialog import FaceCaptureDialog
 
 class RegisterDialog(QDialog):
-    def __init__(self, database, face_recognition, headless=False):
-        super().__init__()
+    DUPLICATE_THRESHOLD = 50
+
+    def __init__(self, database, face_recognition, parent=None):
+        super().__init__(parent)
         self.database = database
         self.face_recognition = face_recognition
-        self.headless = headless
+        self.setWindowTitle("Student Registration")
+        self.setMinimumSize(400, 300)
+        self.init_ui()
 
-        self.setWindowTitle("Register New Student")
-        self.setModal(True)
-        self.setMinimumSize(640, 480)
+    def init_ui(self):
+        layout = QVBoxLayout()
 
-        # Create layout
-        layout = QVBoxLayout(self)
-
-        # Create form layout
-        form_layout = QHBoxLayout()
-
-        # Student ID input
+        # Student ID Input
         self.id_input = QLineEdit()
-        self.id_input.setPlaceholderText("Student ID")
-        form_layout.addWidget(self.id_input)
+        self.id_input.setPlaceholderText("Enter Student ID")
+        layout.addWidget(self.id_input)
 
-        # Name input
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Student Name")
-        form_layout.addWidget(self.name_input)
+        # Video Label
+        self.video_label = QLabel()
+        layout.addWidget(self.video_label)
 
-        layout.addLayout(form_layout)
+        # Capture Button
+        self.capture_btn = QPushButton("Capture Face Data")
+        self.capture_btn.clicked.connect(self.capture_face_data)
+        layout.addWidget(self.capture_btn)
 
-        # Camera preview
-        self.preview_label = QLabel()
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.preview_label)
+        # Register Button
+        self.register_btn = QPushButton("Complete Registration")
+        self.register_btn.clicked.connect(self.finalize_registration)
+        layout.addWidget(self.register_btn)
 
-        # Status label
-        self.status_label = QLabel("Please position your face in the camera")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label)
+        self.setLayout(layout)
 
-        # Buttons
-        button_layout = QHBoxLayout()
-
-        self.capture_btn = QPushButton("Start Capture")
-        self.capture_btn.clicked.connect(self.toggle_capture)
-        button_layout.addWidget(self.capture_btn)
-
-        self.save_btn = QPushButton("Save")
-        self.save_btn.clicked.connect(self.save_student)
-        self.save_btn.setEnabled(False)
-        button_layout.addWidget(self.save_btn)
-
-        layout.addLayout(button_layout)
-
-        # Initialize camera if not in headless mode
-        if not self.headless:
-            self.camera = cv2.VideoCapture(0)
-            self.capture_timer = QTimer()
-            self.capture_timer.timeout.connect(self.update_preview)
-        else:
-            self.camera = None
-            self.capture_timer = None
-            self.preview_label.setText("Camera preview not available in headless mode")
-
-        # Initialize capture variables
-        self.is_capturing = False
-        self.captured_frames = []
-
-    def toggle_capture(self):
-        if self.headless:
-            QMessageBox.warning(self, "Error", "Camera capture not available in headless mode")
+    def capture_face_data(self):
+        student_id = self.id_input.text().strip()
+        if not student_id:
+            QMessageBox.warning(self, "Error", "Please enter Student ID first")
             return
 
-        if not self.is_capturing:
-            if not self.id_input.text() or not self.name_input.text():
-                QMessageBox.warning(self, "Error", "Please enter both ID and Name")
-                return
-
-            self.capture_btn.setText("Stop Capture")
-            self.is_capturing = True
-            self.captured_frames = []
-            self.capture_timer.start(100)  # 10 FPS
-        else:
-            self.capture_btn.setText("Start Capture")
-            self.is_capturing = False
-            self.capture_timer.stop()
-
-            if len(self.captured_frames) >= 30:
-                self.save_btn.setEnabled(True)
-                self.status_label.setText("Capture complete! Click Save to register.")
-            else:
-                self.status_label.setText("Not enough frames captured. Try again.")
-
-    def update_preview(self):
-        if self.headless:
+        # Initial camera check
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            QMessageBox.warning(self, "Error", "Camera not available")
             return
 
-        ret, frame = self.camera.read()
-        if ret:
-            # Detect face
-            face, rect = self.face_recognition.detect_face(frame)
+        face_detected = False
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-            if face is not None:
-                # Draw rectangle around face
-                (x, y, w, h) = rect
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            # Resize frame for better visibility
+            frame = cv2.resize(frame, (640, 480))
 
-                if self.is_capturing:
-                    self.captured_frames.append(frame)
-                    self.status_label.setText(f"Capturing... {len(self.captured_frames)}/30")
-
-                    if len(self.captured_frames) >= 30:
-                        self.toggle_capture()
+            # Face detection
+            faces, _ = self.face_recognition.detect_face(frame)
+            if faces is not None and len(faces) > 0:
+                for face in faces:
+                    (x, y, w, h) = face[:4]
+                    cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                face_detected = True
 
             # Convert frame to QImage
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb_frame.shape
+            rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_image.shape
             bytes_per_line = ch * w
-            qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            self.video_label.setPixmap(QPixmap.fromImage(qt_image))
 
-            # Display the image
-            self.preview_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
-                self.preview_label.size(), Qt.AspectRatioMode.KeepAspectRatio))
+            # Process events to update the UI
+            QApplication.processEvents()
 
-    def save_student(self):
-        student_id = int(self.id_input.text())
-        name = self.name_input.text()
+            # Add a delay to slow down the video feed
+            time.sleep(0.1)
 
-        # Register in database
-        if not self.database.register_student(student_id, name):
-            QMessageBox.warning(self, "Error", "Student ID already exists!")
-            return
+            if face_detected:
+                break
 
-        # In headless mode, simulate captured frames
-        if self.headless:
-            QMessageBox.information(self, "Success", 
-                                  f"Student registered successfully in headless mode!")
-            self.accept()
-            return
+        cap.release()
 
-        # Save training images
-        saved_count = self.face_recognition.save_training_images(student_id, self.captured_frames)
+        if face_detected:
+            # Save the captured frame for inspection
+            capture_frame_path = os.path.join("capture_frames", f"{student_id}_captured_frame.jpg")
+            os.makedirs("capture_frames", exist_ok=True)
+            cv2.imwrite(capture_frame_path, frame)
+            print(f"Captured frame saved as '{capture_frame_path}'")  # Debug message
 
-        if saved_count > 0:
-            QMessageBox.information(self, "Success", 
-                                  f"Student registered successfully!\n{saved_count} training images saved.")
-            self.accept()
+            # Duplicate check
+            if os.path.exists(self.face_recognition.model_file):
+                faces, _ = self.face_recognition.detect_face(frame)
+                if faces is None or len(faces) == 0:
+                    QMessageBox.warning(self, "Error", "No face detected")
+                    print("No face detected in the captured frame.")  # Debug message
+                    return
+
+                user_id, confidence, _ = self.face_recognition.recognize_face(frame)
+                if user_id and confidence < self.DUPLICATE_THRESHOLD:
+                    QMessageBox.warning(self, "Duplicate", "Face already registered")
+                    return
+
+            # Start face capture
+            capture_dialog = FaceCaptureDialog(self.face_recognition, self)
+            if capture_dialog.exec() == QDialog.DialogCode.Accepted:
+                self.save_face_data(student_id, capture_dialog.captured_images)
         else:
-            QMessageBox.warning(self, "Error", "Failed to save training images!")
+            QMessageBox.warning(self, "Error", "No face detected")
 
-    def closeEvent(self, event):
-        if self.capture_timer:
-            self.capture_timer.stop()
-        if self.camera:
-            self.camera.release()
-        super().closeEvent(event)
+    def save_face_data(self, student_id, images):
+        save_dir = os.path.join("training_data", student_id)
+        os.makedirs(save_dir, exist_ok=True)
+        
+        for idx, img in enumerate(images):
+            cv2.imwrite(os.path.join(save_dir, f"{idx}.jpg"), img)
+        
+        QMessageBox.information(
+            self, 
+            "Success", 
+            f"Saved {len(images)} face images for student {student_id}"
+        )
+
+    def finalize_registration(self):
+        student_id = self.id_input.text().strip()
+        if not student_id:
+            QMessageBox.warning(self, "Error", "Student ID required")
+            return
+
+        if not os.path.exists(os.path.join("training_data", student_id)):
+            QMessageBox.warning(self, "Error", "Capture face data first")
+            return
+
+        # Add to database
+        self.database.add_student(student_id, "Unknown")  # Add actual name if available
+        QMessageBox.information(self, "Success", "Registration complete")
+        self.accept()

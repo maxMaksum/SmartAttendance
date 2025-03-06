@@ -1,6 +1,5 @@
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QPushButton,
-                            QMessageBox)
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QMessageBox
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QImage, QPixmap
 import cv2
 
@@ -10,97 +9,72 @@ class AttendanceDialog(QDialog):
         self.database = database
         self.face_recognition = face_recognition
         self.headless = headless
-
         self.setWindowTitle("Mark Attendance")
-        self.setModal(True)
-        self.setMinimumSize(640, 480)
+        self.cap = cv2.VideoCapture(0)  # Open default camera
 
-        # Create layout
-        layout = QVBoxLayout(self)
-
-        # Camera preview
-        self.preview_label = QLabel()
-        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.preview_label)
-
-        # Status label
-        self.status_label = QLabel("Looking for face...")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_label)
-
-        # Close button
-        self.close_btn = QPushButton("Close")
-        self.close_btn.clicked.connect(self.accept)
-        layout.addWidget(self.close_btn)
-
-        # Initialize camera if not in headless mode
-        if not self.headless:
-            self.camera = cv2.VideoCapture(0)
-            self.timer = QTimer()
-            self.timer.timeout.connect(self.update_preview)
-            self.timer.start(100)  # 10 FPS
-        else:
-            self.camera = None
-            self.timer = None
-            self.preview_label.setText("Camera preview not available in headless mode")
-            self.status_label.setText("Attendance marking not available in headless mode")
-
-        # Cooldown timer to prevent multiple recognitions
-        self.cooldown_timer = QTimer()
-        self.cooldown_timer.timeout.connect(self.reset_cooldown)
-        self.in_cooldown = False
-
-    def update_preview(self):
-        if self.headless:
+        if not self.cap.isOpened():
+            QMessageBox.critical(self, "Camera Error", "Unable to access the camera.")
+            self.close()
             return
 
-        ret, frame = self.camera.read()
+        self.setup_ui()
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(30)  # Update every 30 ms
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        self.video_label = QLabel("Camera feed")
+        self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.video_label)
+
+        self.face_count_label = QLabel("Detected faces: 0")
+        self.face_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.face_count_label)
+
+        self.capture_button = QPushButton("Capture & Mark Attendance")
+        self.capture_button.clicked.connect(self.capture_frame)
+        layout.addWidget(self.capture_button)
+
+    def update_frame(self):
+        ret, frame = self.cap.read()
         if ret:
-            # Try to recognize face if not in cooldown
-            if not self.in_cooldown:
-                user_id, confidence, rect = self.face_recognition.recognize_face(frame)
+            print("Frame captured")
+            # Detect faces in the frame
+            faces = self.face_recognition.detect_faces(frame)
+            print(f"Faces detected: {faces}")
+            self.face_count_label.setText(f"Detected faces: {len(faces)}")
+            for (x, y, w, h) in faces:
+                cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            height, width, channel = frame_rgb.shape
+            bytes_per_line = 3 * width
+            qimg = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg)
+            self.video_label.setPixmap(pixmap)  # Ensure the QLabel's pixmap is set
+        else:
+            print("Failed to capture frame")
 
-                if user_id is not None and confidence < 100:  # Adjust confidence threshold as needed
-                    # Draw rectangle around face
-                    (x, y, w, h) = rect
-                    cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+    def capture_frame(self):
+        ret, frame = self.cap.read()
+        if ret:
+            user_id, confidence, rect = self.face_recognition.recognize_face(frame)
+            if user_id is not None:
+                self.database.mark_attendance(user_id)
+                QMessageBox.information(self, "Attendance Marked", f"Attendance marked for Student ID: {user_id}")
+                self.print_match_message(user_id)
+                self.accept()
+            else:
+                QMessageBox.warning(self, "Not Recognized", "No face recognized. Please try again.")
+                # Show the frame with detected faces
+                self.update_frame()
 
-                    # Get student name
-                    student_name = self.database.get_student_name(user_id)
-
-                    if student_name:
-                        # Mark attendance
-                        self.database.mark_attendance(user_id)
-
-                        # Update status
-                        self.status_label.setText(
-                            f"Attendance marked for {student_name} (ID: {user_id})")
-
-                        # Start cooldown
-                        self.in_cooldown = True
-                        self.cooldown_timer.start(3000)  # 3 second cooldown
-                else:
-                    self.status_label.setText("Looking for face...")
-
-            # Convert frame to QImage
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb_frame.shape
-            bytes_per_line = ch * w
-            qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-
-            # Display the image
-            self.preview_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
-                self.preview_label.size(), Qt.AspectRatioMode.KeepAspectRatio))
-
-    def reset_cooldown(self):
-        self.in_cooldown = False
-        self.cooldown_timer.stop()
+    def print_match_message(self, user_id):
+        print(f"Data from webcam matches with data in the database for Student ID: {user_id}")
 
     def closeEvent(self, event):
-        if self.timer:
-            self.timer.stop()
-        if self.cooldown_timer:
-            self.cooldown_timer.stop()
-        if self.camera:
-            self.camera.release()
-        super().closeEvent(event)
+        self.timer.stop()
+        if self.cap.isOpened():
+            self.cap.release()
+        event.accept()
