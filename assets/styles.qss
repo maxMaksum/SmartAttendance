@@ -1,0 +1,78 @@
+/* Main Window */
+QMainWindow {
+    background-color: #f0f0f0;
+}
+
+/* Buttons */
+QPushButton {
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    min-width: 100px;
+}
+
+QPushButton:hover {
+    background-color: #1976D2;
+}
+
+QPushButton:disabled {
+    background-color: #BDBDBD;
+}
+
+/* Labels */
+QLabel {
+    font-size: 14px;
+    color: #212121;
+}
+
+/* Table */
+QTableWidget {
+    background-color: white;
+    alternate-background-color: #f5f5f5;
+    selection-background-color: #2196F3;
+    selection-color: white;
+    border: 1px solid #E0E0E0;
+}
+
+QTableWidget::item {
+    padding: 4px;
+}
+
+QHeaderView::section {
+    background-color: #E0E0E0;
+    padding: 4px;
+    border: none;
+    font-weight: bold;
+}
+
+/* Input Fields */
+QLineEdit {
+    padding: 8px;
+    border: 1px solid #BDBDBD;
+    border-radius: 4px;
+    background-color: white;
+}
+
+QLineEdit:focus {
+    border-color: #2196F3;
+}
+
+/* Dialog */
+QDialog {
+    background-color: #f0f0f0;
+}
+
+/* Progress Bar */
+QProgressBar {
+    border: 1px solid #BDBDBD;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #E0E0E0;
+}
+
+QProgressBar::chunk {
+    background-color: #2196F3;
+}
