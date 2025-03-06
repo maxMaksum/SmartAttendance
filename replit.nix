@@ -1,5 +1,10 @@
 {pkgs}: {
   deps = [
+    pkgs.xorg.libX11
+    pkgs.dbus
+    pkgs.zstd
+    pkgs.fontconfig
+    pkgs.libxkbcommon
     pkgs.zlib
     pkgs.tk
     pkgs.tcl
